@@ -17,14 +17,14 @@
   .teams{font-weight:700;margin:6px 0}
   .meta{font-size:13px;color:#b8c2c8}
   .error{background:#3b1b1b;color:#ffd6d6;padding:10px;border-radius:6px}
+  a.link{color:#1db954;text-decoration:none;font-size:13px}
   pre{white-space:pre-wrap;word-break:break-word;color:#9aa3ad}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>مباريات — مختارة ومصفّاة</h1>
-  <div class="muted">يعرض المباريات المأخوذة من ملفات iCal. التحديث يشتغل تلقائياً. إن ظهر خطأ CORS انقل الملف إلى GitHub Pages أو Netlify.</div>
-
+  <h1>مباريات — مختارة ومصفاة</h1>
+  <div class="muted">يعرض المباريات من مصادر iCal. يجرب جلب الرابط المباشر ثم يستخرج رابط iCal من صفحة المصدر إن لزم. إن فشل بسبب CORS سيجرب proxy تلقائيا.</div>
   <div class="controls">
     <button class="btn" id="refresh">تحديث الآن</button>
     <button class="btn" id="toggle-7">أيام: 7</button>
@@ -35,63 +35,50 @@
   <div id="output" class="list"></div>
 
   <div style="margin-top:12px;color:#9aa3ad;font-size:13px">
-    ملاحظة: إذا لم تعمل الروابط داخل Google Sites بسبب سياسات CORS، انشر الملف على GitHub Pages (repository بسيط مع هذا الملف) أو Netlify. عند الحاجة أزوّد خطوات سريعة لنشر.
+    إذا بقيت رسالة التحميل: انسخ رابط الصفحة وارْسِل لي لأتحقق من الأخطاء في الكونسول أو من استجابة المصادر.
   </div>
 </div>
 
 <script>
-/* ========== CONFIG ========== */
-/* ضع هنا روابط .ics العامة التي تريد قراءتها */
+/* CONFIG: عدّل هذه الروابط الى مصادر تفضلها */
 const ICS_SOURCES = [
-  'https://www.fixtur.es/en/team/al-hilal.ics',            // الهلال - مثال
-  'https://www.fixtur.es/en/team/real-madrid.ics',        // ريال مدريد
-  'https://www.fixtur.es/en/team/barcelona.ics',          // برشلونة
-  'https://www.fixtur.es/en/wedstrijden/champions-league.ics', // دوري الابطال
-  'https://pl.ecal.com/premier-league.ics'                // الدوري الانجليزي (مثال)
+  'https://www.fixtur.es/en/team/al-hilal',        // صفحة الهلال - السكربت سيحاول استخراج ملف iCal منها
+  'https://www.fixtur.es/en/team/real-madrid',
+  'https://www.fixtur.es/en/team/barcelona',
+  'https://www.fixtur.es/en/wedstrijden/champions-league',
+  'https://pl.ecal.com/'                            // صفحة الدوري الانجليزي
 ];
 
-/* الفرق/المفاتيح التي تعتبرها مهمة — تُستخدم للتصفية */
 const KEYWORDS = [
-  // الهلال وديربيات السعودية
-  'Al Hilal','AlNassr','Al Ittihad','Al Ahli','Al Shabab','الهلال','النصر','الاتحاد','الأهلي','الشباب',
-  // كلاسيكو وديربيات ريال وبرسا
-  'Real Madrid','Barcelona','El Clasico','Clasico','Real','Barca','ريال','برشلونة',
-  // فرق إنجليزية مهمة
-  'Manchester City','Man City','Liverpool','Chelsea','Arsenal','Manchester United','Man Utd','Tottenham',
-  // دوري ابطال
-  'Champions League','UEFA Champions League','UCL'
+  'al hilal','النصر','الهلال','alnassr','ittihad','al ittihad','al ahli','barcelona','real madrid','clasico',
+  'manchester city','man city','liverpool','chelsea','arsenal','man united','manchester united','tottenham','champions league','ucl'
 ];
 
-/* عدد أيام قادمة للعرض */
 let DAYS = 7;
-
-/* ========== end config ========== */
-
-const output = document.getElementById('output');
+const out = document.getElementById('output');
 const status = document.getElementById('status');
 
 document.getElementById('refresh').addEventListener('click', loadAll);
-document.getElementById('toggle-7').addEventListener('click', ()=>{DAYS = (DAYS===7?3:7); document.getElementById('toggle-7').textContent = 'أيام: '+DAYS; loadAll();});
+document.getElementById('toggle-7').addEventListener('click', ()=>{DAYS=(DAYS===7?3:7); document.getElementById('toggle-7').textContent='أيام: '+DAYS; loadAll();});
 
 async function loadAll(){
-  output.innerHTML=''; status.textContent = 'تحميل المصادر...';
-  try {
+  out.innerHTML=''; status.textContent='تحميل المصادر...';
+  try{
     const allEvents = [];
-    for(const url of ICS_SOURCES){
-      status.textContent = 'تحميل: ' + url;
+    for(const src of ICS_SOURCES){
+      status.textContent = 'جلب: ' + src;
       try{
-        const text = await fetchIcs(url);
-        const evs = parseIcs(text, url);
+        const icsText = await fetchIcsOrDiscover(src);
+        const evs = parseIcs(icsText, src);
         allEvents.push(...evs);
       } catch(err){
-        // continue but report
         const eDiv = document.createElement('div');
         eDiv.className='error';
-        eDiv.textContent = 'خطأ عند جلب: ' + url + ' — ' + (err.message || err);
-        output.appendChild(eDiv);
+        eDiv.textContent = 'فشل عند: ' + src + ' · ' + (err.message || err);
+        out.appendChild(eDiv);
       }
     }
-    status.textContent = 'معالجة وعرض...';
+    status.textContent = 'تصفية وعرض...';
     const filtered = filterEvents(allEvents);
     render(filtered);
     status.textContent = 'محدث — ' + new Date().toLocaleString();
@@ -100,57 +87,94 @@ async function loadAll(){
   }
 }
 
-/* بسيط: يجرب fetch، إذا رفض بسبب CORS سيقذف استثناء */
-async function fetchIcs(url){
-  const res = await fetch(url);
-  if(!res.ok) throw new Error('HTTP ' + res.status);
-  return await res.text();
+/* يحاول:
+   1) جلب src مباشرة كـ .ics
+   2) إن كانت الصفحة HTML يحاول استخراج رابط iCal (<link rel="alternate" type="text/calendar" href="...">) او اي رابط .ics في الصفحة
+   3) عند فشل CORS يعيد المحاولة عبر proxy AllOrigins
+*/
+async function fetchIcsOrDiscover(src){
+  // اذا يبدو src بالفعل رابط .ics أو ينتهي بـ .ics جربه
+  if(src.trim().toLowerCase().endsWith('.ics')) return fetchWithCorsFallback(src);
+
+  // خلاف ذلك جلب الصفحة HTML أولاً (الوصول قد يفشل CORS)
+  let html;
+  try{ html = await fetchWithCorsFallback(src); }
+  catch(err){ throw new Error('فشل جلب صفحة المصدر: '+err.message); }
+
+  // ابحث عن رابط .ics في HTML: عناصر link rel=alternate type="text/calendar" أو اي href يحتوي .ics
+  const href = extractIcsHrefFromHtml(html, src);
+  if(!href) throw new Error('لم أعثر على رابط iCal داخل صفحة المصدر');
+  return await fetchWithCorsFallback(href);
 }
 
-/* بسيط جدا لتحليل محتوى ICS لاستخراج VEVENTs */
+function extractIcsHrefFromHtml(html, baseUrl){
+  // بسيط: يبحث عن href="... .ics ..." او link rel alternate
+  const linkMatch = html.match(/<link[^>]+rel=["']alternate["'][^>]*type=["'][^"']*calendar[^"']*["'][^>]*href=["']([^"']+)["']/i);
+  if(linkMatch) return absoluteUrl(baseUrl, linkMatch[1]);
+  const hrefMatch = html.match(/href=["']([^"']+\\.ics[^"']*)["']/i);
+  if(hrefMatch) return absoluteUrl(baseUrl, hrefMatch[1]);
+  // بعض الصفحات يولدون روابط عبر javascript، فلن يتم التقاطها هنا
+  return null;
+}
+
+function absoluteUrl(base, url){
+  try{ return new URL(url, base).toString(); } catch(e){ return url; }
+}
+
+async function fetchWithCorsFallback(url){
+  // direct
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return await r.text();
+  } catch(e){
+    // fallback proxy
+    try{
+      const proxy = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      const r2 = await fetch(proxy);
+      if(!r2.ok) throw new Error('Proxy HTTP '+r2.status);
+      return await r2.text();
+    } catch(e2){
+      throw new Error('direct and proxy failed: ' + e2.message);
+    }
+  }
+}
+
+/* تحليل ICS مبسط لاستخراج الأحداث */
 function parseIcs(txt, source){
   const lines = txt.split(/\r?\n/);
   const events = [];
   let cur = null;
   for(let line of lines){
-    if(line.startsWith('BEGIN:VEVENT')){ cur = {source,raw:[]}; continue; }
-    if(line.startsWith('END:VEVENT')){ if(cur) events.push(cur); cur = null; continue; }
-    if(cur){ cur.raw.push(line); }
+    if(line.startsWith('BEGIN:VEVENT')){ cur = {raw:[]}; continue; }
+    if(line.startsWith('END:VEVENT')){ if(cur) events.push(cur); cur=null; continue; }
+    if(cur) cur.raw.push(line);
   }
-  // extract fields
+  const outEv = [];
   for(const e of events){
-    const obj = {summary:'',dtstart:'',dtend:'',location:'',desc:'',source:e.source};
+    const obj = {summary:'',dtstart:'',dtend:'',location:'',desc:'',source};
     for(const l of e.raw){
-      if(l.startsWith('SUMMARY:') || l.startsWith('SUMMARY;')) obj.summary = unfold(l.replace(/^SUMMARY[^:]*:/,''));
-      else if(l.startsWith('DTSTART')) obj.dtstart = unfold(l.replace(/^DTSTART[^:]*:/,''));
-      else if(l.startsWith('DTEND')) obj.dtend = unfold(l.replace(/^DTEND[^:]*:/,''));
-      else if(l.startsWith('LOCATION:')||l.startsWith('LOCATION;')) obj.location = unfold(l.replace(/^LOCATION[^:]*:/,''));
-      else if(l.startsWith('DESCRIPTION:')||l.startsWith('DESCRIPTION;')) obj.desc += unfold(l.replace(/^DESCRIPTION[^:]*:/,' '));
+      if(l.startsWith('SUMMARY')) obj.summary = (l.split(':').slice(1).join(':')||'').trim();
+      else if(l.startsWith('DTSTART')) obj.dtstart = (l.split(':').slice(1).join(':')||'').trim();
+      else if(l.startsWith('DTEND')) obj.dtend = (l.split(':').slice(1).join(':')||'').trim();
+      else if(l.startsWith('LOCATION')) obj.location = (l.split(':').slice(1).join(':')||'').trim();
+      else if(l.startsWith('DESCRIPTION')) obj.desc += ' ' + (l.split(':').slice(1).join(':')||'').trim();
     }
-    // parse dates
     obj.date = parseIcalDate(obj.dtstart);
-    obj.summary = obj.summary || obj.desc || 'Match';
-    // normalize
-    events[events.indexOf(e)] = obj;
+    if(obj.date) outEv.push(obj);
   }
-  // return
-  return events.filter(x=>x.date); 
+  return outEv;
 }
-
-function unfold(s){ return s.replace(/\\n/g,' ').trim(); }
 
 function parseIcalDate(s){
   if(!s) return null;
-  // support: 20251109T153000Z or 20251109
   const m = s.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?/);
   if(!m) return null;
   const y=+m[1],mo=+m[2]-1,d=+m[3];
   if(m[4]){
-    const hh=+m[4],mm=+m[5],ss=+m[6];
-    // if ends with Z assume UTC
-    const isZ = /Z$/.test(s);
-    if(isZ) return new Date(Date.UTC(y,mo,d,hh,mm,ss));
-    return new Date(y,mo,d,hh,mm,ss);
+    const hh=+m[4],mm=+m[5],ss=+m[6]||0;
+    const isZ=/Z$/.test(s);
+    return isZ? new Date(Date.UTC(y,mo,d,hh,mm,ss)) : new Date(y,mo,d,hh,mm,ss);
   }
   return new Date(y,mo,d,12,0,0);
 }
@@ -158,43 +182,30 @@ function parseIcalDate(s){
 function filterEvents(events){
   const now = new Date();
   const to = new Date(now.getTime() + DAYS*24*60*60*1000);
-  // keep in range and matching keywords
-  const out = events.filter(ev=>{
+  return events.filter(ev=>{
     if(ev.date < now) return false;
     if(ev.date > to) return false;
-    const text = (ev.summary + ' ' + (ev.location||'') + ' ' + ev.desc).toLowerCase();
-    // match any keyword
-    for(const k of KEYWORDS){
-      if(text.indexOf(k.toLowerCase()) !== -1) return true;
-    }
+    const text = ((ev.summary||'') + ' ' + (ev.location||'') + ' ' + (ev.desc||'')).toLowerCase();
+    for(const k of KEYWORDS) if(text.indexOf(k.toLowerCase()) !== -1) return true;
     return false;
-  });
-  // sort
-  out.sort((a,b)=>a.date - b.date);
-  return out;
+  }).sort((a,b)=>a.date-b.date);
 }
 
 function render(events){
-  output.innerHTML = '';
-  if(events.length===0){
-    const d = document.createElement('div'); d.className='muted'; d.textContent='لا توجد مباريات مطابقة في النطاق الزمني المحدد.'; output.appendChild(d); return;
-  }
+  out.innerHTML='';
+  if(events.length===0){ out.innerHTML='<div class="muted">لا توجد مباريات مطابقة.</div>'; return; }
   for(const e of events){
     const el = document.createElement('div'); el.className='match';
-    const when = document.createElement('div'); when.className='when';
-    when.textContent = e.date.toLocaleString();
-    const teams = document.createElement('div'); teams.className='teams';
-    teams.textContent = e.summary;
-    const meta = document.createElement('div'); meta.className='meta';
-    meta.textContent = (e.location?('المكان: '+e.location+' · '):'') + 'المصدر: ' + e.source;
+    const when = document.createElement('div'); when.className='when'; when.textContent = e.date.toLocaleString();
+    const teams = document.createElement('div'); teams.className='teams'; teams.textContent = e.summary || '(match)';
+    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = (e.location?('المكان: '+e.location+' · '):'') + 'المصدر: ' + e.source;
     el.appendChild(when); el.appendChild(teams); el.appendChild(meta);
-    output.appendChild(el);
+    out.appendChild(el);
   }
 }
 
-/* run initial */
+/* run */
 loadAll();
-/* auto refresh every 10 minutes */
 setInterval(loadAll, 10*60*1000);
 </script>
 </body>
