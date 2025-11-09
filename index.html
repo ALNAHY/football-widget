@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Matches widget - filtered</title>
+<title>مبارياتك المهمة</title>
 <style>
   body{font-family:system-ui,Arial,sans-serif;background:#0b0d10;color:#eaf0f6;margin:0;padding:18px}
   .wrap{max-width:980px;margin:0 auto}
@@ -13,53 +13,76 @@
   .btn{background:#111417;border:1px solid rgba(255,255,255,0.04);padding:8px 10px;border-radius:8px;color:#eaf0f6;text-decoration:none;font-size:13px;cursor:pointer}
   .list{display:grid;gap:8px}
   .match{background:#0f1316;padding:10px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.5)}
+  .match.important{border-left:4px solid #1db954}
   .when{font-size:13px;color:#9aa3ad}
   .teams{font-weight:700;margin:6px 0}
   .meta{font-size:13px;color:#b8c2c8}
   .error{background:#3b1b1b;color:#ffd6d6;padding:10px;border-radius:6px}
-  a.link{color:#1db954;text-decoration:none;font-size:13px}
-  pre{white-space:pre-wrap;word-break:break-word;color:#9aa3ad}
+  .tag{display:inline-block;padding:4px 8px;border-radius:12px;background:rgba(255,255,255,0.03);font-size:12px;margin-left:8px}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>مباريات — مختارة ومصفاة</h1>
-  <div class="muted">يعرض المباريات من مصادر iCal. يجرب جلب الرابط المباشر ثم يستخرج رابط iCal من صفحة المصدر إن لزم. إن فشل بسبب CORS سيجرب proxy تلقائيا.</div>
+  <h1>مبارياتك المهمة</h1>
+  <div class="muted">يعرض فقط المباريات التي تهمك — يعتمد على كلمات مفتاح محددة داخل الكود. يجرب جلب iCal مباشرة ثم يستخدم proxy عند الحاجة.</div>
+
   <div class="controls">
     <button class="btn" id="refresh">تحديث الآن</button>
     <button class="btn" id="toggle-7">أيام: 7</button>
-    <div style="margin-left:auto" class="muted">مصادر قابلة للتعديل في الكود</div>
+    <button class="btn" id="show-all">اظهار كل النتائج</button>
+    <div style="margin-left:auto" class="muted">انسخ هذا الملف كـ index.html ثم Commit في الريبو.</div>
   </div>
 
   <div id="status" class="muted">جارٍ التحميل...</div>
   <div id="output" class="list"></div>
-
   <div style="margin-top:12px;color:#9aa3ad;font-size:13px">
-    إذا بقيت رسالة التحميل: انسخ رابط الصفحة وارْسِل لي لأتحقق من الأخطاء في الكونسول أو من استجابة المصادر.
+    إن ظهر تحميل مستمر: افتح Console في المتصفح (F12) وانسخ الأخطاء هنا. إن كان CORS مهيمن انشر على Netlify/Pages كما فعلت مسبقاً.
   </div>
 </div>
 
 <script>
-/* CONFIG: عدّل هذه الروابط الى مصادر تفضلها */
+/* ========== CONFIG ========== */
+/* مصادر مبدئية: صفحات فرق وبطولات. يمكنك تعديلها لاحقاً. */
 const ICS_SOURCES = [
-  'https://www.fixtur.es/en/team/al-hilal',        // صفحة الهلال - السكربت سيحاول استخراج ملف iCal منها
+  'https://www.fixtur.es/en/team/al-hilal',
+  'https://www.fixtur.es/en/team/al-nassr',
+  'https://www.fixtur.es/en/team/al-ittihad',
+  'https://www.fixtur.es/en/team/al-ahli',
+  'https://www.fixtur.es/en/team/al-shabab',
   'https://www.fixtur.es/en/team/real-madrid',
   'https://www.fixtur.es/en/team/barcelona',
   'https://www.fixtur.es/en/wedstrijden/champions-league',
-  'https://pl.ecal.com/'                            // صفحة الدوري الانجليزي
+  'https://pl.ecal.com/',
+  // اضافة مصادر بديلة مفيدة:
+  'https://www.fotmob.com/teams/xx', // اذا اردت استبدال برابط حقيقي ضع هنا
 ];
 
+/* كلمات وفِرق مهمة - عِبر عنها بالانكليزي والعربي للتصفية */
 const KEYWORDS = [
-  'al hilal','النصر','الهلال','alnassr','ittihad','al ittihad','al ahli','barcelona','real madrid','clasico',
-  'manchester city','man city','liverpool','chelsea','arsenal','man united','manchester united','tottenham','champions league','ucl'
+  'al hilal','الهلال','alnassr','النصر','al ittihad','الاتحاد','al ahli','الاهلي','al shabab','الشباب',
+  'real madrid','ريال','barcelona','برشلونة','clasico','clasico','el clasico',
+  'manchester city','man city','man city','manchester united','man united','man united','liverpool','chelsea','arsenal','tottenham','spurs',
+  'champions league','ucl','uefa champions'
+];
+
+/* قواعد الاظهار: مباراة تعتبر مهمة اذا:
+   - احد الطرفين او كلاهما في قائمة الفرق المهمة
+   - او المنافسة دوري ابطال / كلاسيكو
+*/
+const TEAMS_LIST = [
+  'al hilal','alnassr','al ittihad','al ahli','al shabab',
+  'real madrid','barcelona','manchester city','manchester united','liverpool','chelsea','arsenal','tottenham'
 ];
 
 let DAYS = 7;
+let SHOW_ALL = false;
+/* ========== end config ========== */
+
 const out = document.getElementById('output');
 const status = document.getElementById('status');
-
 document.getElementById('refresh').addEventListener('click', loadAll);
 document.getElementById('toggle-7').addEventListener('click', ()=>{DAYS=(DAYS===7?3:7); document.getElementById('toggle-7').textContent='أيام: '+DAYS; loadAll();});
+document.getElementById('show-all').addEventListener('click', ()=>{SHOW_ALL=!SHOW_ALL; document.getElementById('show-all').textContent = SHOW_ALL ? 'اظهار المطابق فقط' : 'اظهار كل النتائج'; loadAll();});
 
 async function loadAll(){
   out.innerHTML=''; status.textContent='تحميل المصادر...';
@@ -79,7 +102,7 @@ async function loadAll(){
       }
     }
     status.textContent = 'تصفية وعرض...';
-    const filtered = filterEvents(allEvents);
+    const filtered = filterAndRank(allEvents);
     render(filtered);
     status.textContent = 'محدث — ' + new Date().toLocaleString();
   } catch(err){
@@ -87,33 +110,21 @@ async function loadAll(){
   }
 }
 
-/* يحاول:
-   1) جلب src مباشرة كـ .ics
-   2) إن كانت الصفحة HTML يحاول استخراج رابط iCal (<link rel="alternate" type="text/calendar" href="...">) او اي رابط .ics في الصفحة
-   3) عند فشل CORS يعيد المحاولة عبر proxy AllOrigins
-*/
+/* محاولات جلب: direct -> استخراج iCal من صفحة -> proxy fallback */
 async function fetchIcsOrDiscover(src){
-  // اذا يبدو src بالفعل رابط .ics أو ينتهي بـ .ics جربه
-  if(src.trim().toLowerCase().endsWith('.ics')) return fetchWithCorsFallback(src);
-
-  // خلاف ذلك جلب الصفحة HTML أولاً (الوصول قد يفشل CORS)
-  let html;
-  try{ html = await fetchWithCorsFallback(src); }
-  catch(err){ throw new Error('فشل جلب صفحة المصدر: '+err.message); }
-
-  // ابحث عن رابط .ics في HTML: عناصر link rel=alternate type="text/calendar" أو اي href يحتوي .ics
+  if(src.trim().toLowerCase().endsWith('.ics')) return fetchWithFallback(src);
+  // جلب صفحة المصدر (html) ثم البحث عن رابط .ics داخلها
+  const html = await fetchWithFallback(src);
   const href = extractIcsHrefFromHtml(html, src);
-  if(!href) throw new Error('لم أعثر على رابط iCal داخل صفحة المصدر');
-  return await fetchWithCorsFallback(href);
+  if(href) return await fetchWithFallback(href);
+  throw new Error('لم أعثر على رابط iCal في الصفحة');
 }
 
 function extractIcsHrefFromHtml(html, baseUrl){
-  // بسيط: يبحث عن href="... .ics ..." او link rel alternate
   const linkMatch = html.match(/<link[^>]+rel=["']alternate["'][^>]*type=["'][^"']*calendar[^"']*["'][^>]*href=["']([^"']+)["']/i);
   if(linkMatch) return absoluteUrl(baseUrl, linkMatch[1]);
   const hrefMatch = html.match(/href=["']([^"']+\\.ics[^"']*)["']/i);
   if(hrefMatch) return absoluteUrl(baseUrl, hrefMatch[1]);
-  // بعض الصفحات يولدون روابط عبر javascript، فلن يتم التقاطها هنا
   return null;
 }
 
@@ -121,8 +132,7 @@ function absoluteUrl(base, url){
   try{ return new URL(url, base).toString(); } catch(e){ return url; }
 }
 
-async function fetchWithCorsFallback(url){
-  // direct
+async function fetchWithFallback(url){
   try{
     const r = await fetch(url);
     if(!r.ok) throw new Error('HTTP '+r.status);
@@ -140,7 +150,7 @@ async function fetchWithCorsFallback(url){
   }
 }
 
-/* تحليل ICS مبسط لاستخراج الأحداث */
+/* تحليل ICS بسيط */
 function parseIcs(txt, source){
   const lines = txt.split(/\r?\n/);
   const events = [];
@@ -179,33 +189,56 @@ function parseIcalDate(s){
   return new Date(y,mo,d,12,0,0);
 }
 
-function filterEvents(events){
+/* تصفية وترتيب مع وضع علامات للاهمية */
+function filterAndRank(events){
   const now = new Date();
   const to = new Date(now.getTime() + DAYS*24*60*60*1000);
-  return events.filter(ev=>{
-    if(ev.date < now) return false;
-    if(ev.date > to) return false;
+  const results = [];
+  for(const ev of events){
+    if(!ev.date) continue;
+    if(ev.date < now || ev.date > to) continue;
     const text = ((ev.summary||'') + ' ' + (ev.location||'') + ' ' + (ev.desc||'')).toLowerCase();
-    for(const k of KEYWORDS) if(text.indexOf(k.toLowerCase()) !== -1) return true;
-    return false;
-  }).sort((a,b)=>a.date-b.date);
+    // اذا SHOW_ALL فعرض كل النتائج
+    if(SHOW_ALL){
+      results.push({...ev, priority: false});
+      continue;
+    }
+    // بحث عن اي كلمة مفتاح
+    let matched = false;
+    for(const k of KEYWORDS) if(text.indexOf(k.toLowerCase()) !== -1){ matched = true; break; }
+    if(!matched) continue;
+    // تحديد اذا كانت مهمة جدا: طرفان من قائمة TEAMS_LIST او دوري ابطال او كلاسيكو
+    let important = false;
+    const teamsFound = TEAMS_LIST.filter(t=> text.indexOf(t.toLowerCase()) !== -1);
+    if(teamsFound.length >= 2) important = true;
+    if(text.indexOf('champions') !== -1 || text.indexOf('ucl') !== -1 || text.indexOf('clasico') !== -1) important = true;
+    results.push({...ev, priority: important});
+  }
+  results.sort((a,b)=>a.date - b.date);
+  return results;
 }
 
 function render(events){
   out.innerHTML='';
-  if(events.length===0){ out.innerHTML='<div class="muted">لا توجد مباريات مطابقة.</div>'; return; }
+  if(events.length===0){ out.innerHTML='<div class="muted">لا توجد مباريات مطابقة خلال الفترة المحددة.</div>'; return; }
   for(const e of events){
-    const el = document.createElement('div'); el.className='match';
+    const el = document.createElement('div'); el.className = 'match' + (e.priority? ' important' : '');
     const when = document.createElement('div'); when.className='when'; when.textContent = e.date.toLocaleString();
     const teams = document.createElement('div'); teams.className='teams'; teams.textContent = e.summary || '(match)';
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = (e.location?('المكان: '+e.location+' · '):'') + 'المصدر: ' + e.source;
+    const meta = document.createElement('div'); meta.className='meta';
+    meta.textContent = (e.location?('المكان: '+e.location+' · '):'') + 'المصدر: ' + e.source;
+    if(e.priority){
+      const tag = document.createElement('span'); tag.className='tag'; tag.textContent='قوية';
+      teams.appendChild(tag);
+    }
     el.appendChild(when); el.appendChild(teams); el.appendChild(meta);
     out.appendChild(el);
   }
 }
 
-/* run */
+/* تشغيل أولي */
 loadAll();
+/* تحديث دوري */
 setInterval(loadAll, 10*60*1000);
 </script>
 </body>
