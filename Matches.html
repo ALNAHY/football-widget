@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Matches widget - filtered</title>
+<style>
+  body{font-family:system-ui,Arial,sans-serif;background:#0b0d10;color:#eaf0f6;margin:0;padding:18px}
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:18px;margin:0 0 8px}
+  .muted{color:#9aa3ad;font-size:13px;margin-bottom:12px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .btn{background:#111417;border:1px solid rgba(255,255,255,0.04);padding:8px 10px;border-radius:8px;color:#eaf0f6;text-decoration:none;font-size:13px;cursor:pointer}
+  .list{display:grid;gap:8px}
+  .match{background:#0f1316;padding:10px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.5)}
+  .when{font-size:13px;color:#9aa3ad}
+  .teams{font-weight:700;margin:6px 0}
+  .meta{font-size:13px;color:#b8c2c8}
+  .error{background:#3b1b1b;color:#ffd6d6;padding:10px;border-radius:6px}
+  pre{white-space:pre-wrap;word-break:break-word;color:#9aa3ad}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>مباريات — مختارة ومصفّاة</h1>
+  <div class="muted">يعرض المباريات المأخوذة من ملفات iCal. التحديث يشتغل تلقائياً. إن ظهر خطأ CORS انقل الملف إلى GitHub Pages أو Netlify.</div>
+
+  <div class="controls">
+    <button class="btn" id="refresh">تحديث الآن</button>
+    <button class="btn" id="toggle-7">أيام: 7</button>
+    <div style="margin-left:auto" class="muted">مصادر قابلة للتعديل في الكود</div>
+  </div>
+
+  <div id="status" class="muted">جارٍ التحميل...</div>
+  <div id="output" class="list"></div>
+
+  <div style="margin-top:12px;color:#9aa3ad;font-size:13px">
+    ملاحظة: إذا لم تعمل الروابط داخل Google Sites بسبب سياسات CORS، انشر الملف على GitHub Pages (repository بسيط مع هذا الملف) أو Netlify. عند الحاجة أزوّد خطوات سريعة لنشر.
+  </div>
+</div>
+
+<script>
+/* ========== CONFIG ========== */
+/* ضع هنا روابط .ics العامة التي تريد قراءتها */
+const ICS_SOURCES = [
+  'https://www.fixtur.es/en/team/al-hilal.ics',            // الهلال - مثال
+  'https://www.fixtur.es/en/team/real-madrid.ics',        // ريال مدريد
+  'https://www.fixtur.es/en/team/barcelona.ics',          // برشلونة
+  'https://www.fixtur.es/en/wedstrijden/champions-league.ics', // دوري الابطال
+  'https://pl.ecal.com/premier-league.ics'                // الدوري الانجليزي (مثال)
+];
+
+/* الفرق/المفاتيح التي تعتبرها مهمة — تُستخدم للتصفية */
+const KEYWORDS = [
+  // الهلال وديربيات السعودية
+  'Al Hilal','AlNassr','Al Ittihad','Al Ahli','Al Shabab','الهلال','النصر','الاتحاد','الأهلي','الشباب',
+  // كلاسيكو وديربيات ريال وبرسا
+  'Real Madrid','Barcelona','El Clasico','Clasico','Real','Barca','ريال','برشلونة',
+  // فرق إنجليزية مهمة
+  'Manchester City','Man City','Liverpool','Chelsea','Arsenal','Manchester United','Man Utd','Tottenham',
+  // دوري ابطال
+  'Champions League','UEFA Champions League','UCL'
+];
+
+/* عدد أيام قادمة للعرض */
+let DAYS = 7;
+
+/* ========== end config ========== */
+
+const output = document.getElementById('output');
+const status = document.getElementById('status');
+
+document.getElementById('refresh').addEventListener('click', loadAll);
+document.getElementById('toggle-7').addEventListener('click', ()=>{DAYS = (DAYS===7?3:7); document.getElementById('toggle-7').textContent = 'أيام: '+DAYS; loadAll();});
+
+async function loadAll(){
+  output.innerHTML=''; status.textContent = 'تحميل المصادر...';
+  try {
+    const allEvents = [];
+    for(const url of ICS_SOURCES){
+      status.textContent = 'تحميل: ' + url;
+      try{
+        const text = await fetchIcs(url);
+        const evs = parseIcs(text, url);
+        allEvents.push(...evs);
+      } catch(err){
+        // continue but report
+        const eDiv = document.createElement('div');
+        eDiv.className='error';
+        eDiv.textContent = 'خطأ عند جلب: ' + url + ' — ' + (err.message || err);
+        output.appendChild(eDiv);
+      }
+    }
+    status.textContent = 'معالجة وعرض...';
+    const filtered = filterEvents(allEvents);
+    render(filtered);
+    status.textContent = 'محدث — ' + new Date().toLocaleString();
+  } catch(err){
+    status.textContent = 'فشل عام: ' + (err.message || err);
+  }
+}
+
+/* بسيط: يجرب fetch، إذا رفض بسبب CORS سيقذف استثناء */
+async function fetchIcs(url){
+  const res = await fetch(url);
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  return await res.text();
+}
+
+/* بسيط جدا لتحليل محتوى ICS لاستخراج VEVENTs */
+function parseIcs(txt, source){
+  const lines = txt.split(/\r?\n/);
+  const events = [];
+  let cur = null;
+  for(let line of lines){
+    if(line.startsWith('BEGIN:VEVENT')){ cur = {source,raw:[]}; continue; }
+    if(line.startsWith('END:VEVENT')){ if(cur) events.push(cur); cur = null; continue; }
+    if(cur){ cur.raw.push(line); }
+  }
+  // extract fields
+  for(const e of events){
+    const obj = {summary:'',dtstart:'',dtend:'',location:'',desc:'',source:e.source};
+    for(const l of e.raw){
+      if(l.startsWith('SUMMARY:') || l.startsWith('SUMMARY;')) obj.summary = unfold(l.replace(/^SUMMARY[^:]*:/,''));
+      else if(l.startsWith('DTSTART')) obj.dtstart = unfold(l.replace(/^DTSTART[^:]*:/,''));
+      else if(l.startsWith('DTEND')) obj.dtend = unfold(l.replace(/^DTEND[^:]*:/,''));
+      else if(l.startsWith('LOCATION:')||l.startsWith('LOCATION;')) obj.location = unfold(l.replace(/^LOCATION[^:]*:/,''));
+      else if(l.startsWith('DESCRIPTION:')||l.startsWith('DESCRIPTION;')) obj.desc += unfold(l.replace(/^DESCRIPTION[^:]*:/,' '));
+    }
+    // parse dates
+    obj.date = parseIcalDate(obj.dtstart);
+    obj.summary = obj.summary || obj.desc || 'Match';
+    // normalize
+    events[events.indexOf(e)] = obj;
+  }
+  // return
+  return events.filter(x=>x.date); 
+}
+
+function unfold(s){ return s.replace(/\\n/g,' ').trim(); }
+
+function parseIcalDate(s){
+  if(!s) return null;
+  // support: 20251109T153000Z or 20251109
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?/);
+  if(!m) return null;
+  const y=+m[1],mo=+m[2]-1,d=+m[3];
+  if(m[4]){
+    const hh=+m[4],mm=+m[5],ss=+m[6];
+    // if ends with Z assume UTC
+    const isZ = /Z$/.test(s);
+    if(isZ) return new Date(Date.UTC(y,mo,d,hh,mm,ss));
+    return new Date(y,mo,d,hh,mm,ss);
+  }
+  return new Date(y,mo,d,12,0,0);
+}
+
+function filterEvents(events){
+  const now = new Date();
+  const to = new Date(now.getTime() + DAYS*24*60*60*1000);
+  // keep in range and matching keywords
+  const out = events.filter(ev=>{
+    if(ev.date < now) return false;
+    if(ev.date > to) return false;
+    const text = (ev.summary + ' ' + (ev.location||'') + ' ' + ev.desc).toLowerCase();
+    // match any keyword
+    for(const k of KEYWORDS){
+      if(text.indexOf(k.toLowerCase()) !== -1) return true;
+    }
+    return false;
+  });
+  // sort
+  out.sort((a,b)=>a.date - b.date);
+  return out;
+}
+
+function render(events){
+  output.innerHTML = '';
+  if(events.length===0){
+    const d = document.createElement('div'); d.className='muted'; d.textContent='لا توجد مباريات مطابقة في النطاق الزمني المحدد.'; output.appendChild(d); return;
+  }
+  for(const e of events){
+    const el = document.createElement('div'); el.className='match';
+    const when = document.createElement('div'); when.className='when';
+    when.textContent = e.date.toLocaleString();
+    const teams = document.createElement('div'); teams.className='teams';
+    teams.textContent = e.summary;
+    const meta = document.createElement('div'); meta.className='meta';
+    meta.textContent = (e.location?('المكان: '+e.location+' · '):'') + 'المصدر: ' + e.source;
+    el.appendChild(when); el.appendChild(teams); el.appendChild(meta);
+    output.appendChild(el);
+  }
+}
+
+/* run initial */
+loadAll();
+/* auto refresh every 10 minutes */
+setInterval(loadAll, 10*60*1000);
+</script>
+</body>
+</html>
